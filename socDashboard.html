@@ -1,0 +1,1129 @@
+<template>
+<div class={shellCls}>
+
+    <!-- ── HEADER ── -->
+    <header class="soc-header">
+        <div class="header-left">
+            <span class="header-badge">SOC</span>
+            <div>
+                <h1 class="header-title">Security Operations Center</h1>
+                <p class="header-sub">Salesforce Identity &amp; Access Intelligence</p>
+            </div>
+        </div>
+        <div class="header-right">
+            <span class="live-dot"></span>
+            <span class="live-label">LIVE</span>
+            <span class="header-time">{currentTime}</span>
+            <button class="theme-btn" onclick={handleThemeToggle} title="Toggle dark / light theme">
+                {themeIcon}
+            </button>
+            <button class="refresh-btn" onclick={handleRefresh} disabled={loading}>
+                <template if:true={loading}>
+                    <span class="spin">⟳</span>
+                </template>
+                <template if:false={loading}>⟳ Refresh</template>
+            </button>
+        </div>
+    </header>
+
+    <!-- ── ERROR BANNER ── -->
+    <template if:true={errorMessage}>
+        <div class="error-banner">⚠ {errorMessage}</div>
+    </template>
+
+    <!-- ── TAB NAV ── -->
+    <nav class="tab-nav">
+        <template for:each={tabs} for:item="tab">
+            <button key={tab.id}
+                class={tab.cls}
+                data-id={tab.id}
+                onclick={handleTabClick}>
+                <span class="tab-icon">{tab.icon}</span>
+                {tab.label}
+                <template if:true={tab.count}>
+                    <span class={tab.countCls}>{tab.count}</span>
+                </template>
+            </button>
+        </template>
+    </nav>
+
+    <!-- ═══════════════════════════════════════════
+            TAB: OVERVIEW
+    ═══════════════════════════════════════════ -->
+    <template if:true={isTabOverview}>
+        <div class="section-grid">
+            <div class="kpi-card kpi-critical">
+                <div class="kpi-label">Critical Risk Users</div>
+                <div class="kpi-value">{summary.criticalRiskUsers}</div>
+                <div class="kpi-sub">ModifyAll + EncryptedData + No MFA</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-label">Modify All Data</div>
+                <div class="kpi-value">{summary.modifyAllDataUsers}</div>
+                <div class="kpi-sub">Active users (profile)</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-label">View Encrypted Data</div>
+                <div class="kpi-value">{summary.viewEncryptedUsers}</div>
+                <div class="kpi-sub">Sensitive field access</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">MFA Disabled</div>
+                <div class="kpi-value">{summary.mfaDisabledUsers}</div>
+                <div class="kpi-sub">ForceTwoFactor = false</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">MFA Bypass</div>
+                <div class="kpi-value">{summary.mfaBypassUsers}</div>
+                <div class="kpi-sub">Via permission set</div>
+            </div>
+            <div class="kpi-card kpi-yellow">
+                <div class="kpi-label">Dormant Users</div>
+                <div class="kpi-value">{summary.dormantUsers}</div>
+                <div class="kpi-sub">No login 90+ days</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-label">Dormant Privileged</div>
+                <div class="kpi-value">{summary.dormantPrivilegedUsers}</div>
+                <div class="kpi-sub">Dormant + ModifyAllData</div>
+            </div>
+            <div class="kpi-card kpi-yellow">
+                <div class="kpi-label">Export Enabled</div>
+                <div class="kpi-value">{summary.exportEnabledUsers}</div>
+                <div class="kpi-sub">Data / Report export</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">View All Data</div>
+                <div class="kpi-value">{summary.viewAllDataUsers}</div>
+                <div class="kpi-sub">Org-wide read access</div>
+            </div>
+            <div class="kpi-card kpi-yellow">
+                <div class="kpi-label">Password Never Expires</div>
+                <div class="kpi-value">{summary.passwordNeverExpiresUsers}</div>
+                <div class="kpi-sub">Weak password policy</div>
+            </div>
+            <div class="kpi-card kpi-orange">
+                <div class="kpi-label">Failed Logins (24h)</div>
+                <div class="kpi-value">{summary.failedLoginsLast24h}</div>
+                <div class="kpi-sub">Auth failures</div>
+            </div>
+            <div class="kpi-card kpi-red">
+                <div class="kpi-label">Package Events (30d)</div>
+                <div class="kpi-value">{summary.packageInstallEvents}</div>
+                <div class="kpi-sub">Audit trail hits</div>
+            </div>
+        </div>
+    </template>
+
+    <!-- ═══════════════════════════════════════════
+            TAB: DORMANT ACCOUNTS
+    ═══════════════════════════════════════════ -->
+    <template if:true={isTabDormant}>
+        <div class="tab-content">
+
+            <!-- Sub-tab nav -->
+            <div class="sub-tab-nav">
+                <button class={dormantSubTabCls.active} data-sub="active" onclick={handleDormantSubTab}>
+                    💤 Active Dormant <span class="tab-count">{_dormantUsers.length}</span>
+                </button>
+                <button class={dormantSubTabCls.frozen} data-sub="frozen" onclick={handleDormantSubTab}>
+                    🧊 Frozen Accounts <span class="tab-count">{frozenUsers.length}</span>
+                </button>
+            </div>
+
+            <!-- ── SUB-TAB: ACTIVE DORMANT ── -->
+            <template if:true={isDormantSubActive}>
+                <div class="section-header" style="margin-top:14px">
+                    <div class="section-header-row">
+                        <div>
+                            <h2>Dormant Account Detection
+                                <span class="rule-tag rule-tag-hoverable"
+                                      data-rules="dormant"
+                                      onmouseenter={handleRuleTagEnter}
+                                      onmouseleave={handleRuleTagLeave}>
+                                    Rules H1 H2 H3
+                                </span>
+                            </h2>
+                            <p class="section-desc">Active users with no login for 90+ days. Select accounts and freeze them. System Admins and Integration users are protected.</p>
+                        </div>
+                        <div class="header-actions">
+                            <div class="search-box-wrap">
+                                <span class="search-icon">⌕</span>
+                                <input type="text" class="search-box"
+                                    placeholder="Search name or username…"
+                                    value={dormantSearch}
+                                    oninput={handleDormantSearch} />
+                                <template if:true={dormantSearch}>
+                                    <button class="search-clear" onclick={clearDormantSearch}>✕</button>
+                                </template>
+                            </div>
+                            <!-- CSV export is restricted to admin profiles (SocFreezeController.canDownloadCsv) -->
+                            <template if:true={canExportCsv}>
+                                <button class="csv-btn" onclick={downloadDormantCsv} title="Download CSV">
+                                    Download CSV ⬇
+                                </button>
+                            </template>
+                            <template if:false={canExportCsv}>
+                                <span class="csv-locked" title={csvLockedTitle}>🔒 Export restricted</span>
+                            </template>
+                        </div>
+                    </div>
+                    <div class="filter-bar">
+                        <span class="filter-label">Filter by profile:</span>
+                        <select class="filter-select" onchange={handleProfileFilter}>
+                            <option value="">All Profiles</option>
+                            <template for:each={dormantProfileOptions} for:item="opt">
+                                <option key={opt} value={opt}>{opt}</option>
+                            </template>
+                        </select>
+                        <span class="filter-label">Permission Set:</span>
+                        <select class="filter-select" onchange={handleDormantPermSetFilter}>
+                            <option value="">All Permission Sets</option>
+                            <template for:each={dormantPermSetOptions} for:item="opt">
+                                <option key={opt} value={opt}>{opt}</option>
+                            </template>
+                        </select>
+                        <span class="filter-label">Severity:</span>
+                        <select class="filter-select" onchange={handleSeverityFilter}>
+                            <option value="">All</option>
+                            <option value="Critical">Critical</option>
+                            <option value="High">High</option>
+                        </select>
+                        <span class="results-count">{dormantFilteredCount} users</span>
+                        <button class="filter-reset" onclick={resetDormantFilters}>Reset</button>
+                    </div>
+
+                    <!-- ── RECORD LIMIT CONTROL ── -->
+                    <div class="limit-bar">
+                        <span class="filter-label">Records to load:</span>
+                        <template for:each={dormantLimitPresets} for:item="p">
+                            <button key={p.value} class={p.cls}
+                                data-value={p.value}
+                                onclick={handleDormantLimitPreset}>{p.label}</button>
+                        </template>
+                        <span class="filter-label tw-separator">Custom:</span>
+                        <input type="number" class="tw-custom-num"
+                            min="1" max="10000"
+                            value={dormantCustomLimit}
+                            oninput={handleDormantCustomLimitInput} />
+                        <button class="tw-apply-btn" onclick={applyDormantCustomLimit}>Apply</button>
+                        <template if:true={dormantHasMore}>
+                            <button class="load-all-btn" onclick={loadAllDormant}>⬇ Load all ({dormantTotalCount})</button>
+                        </template>
+                        <span class="limit-info">{dormantLimitInfo}</span>
+                    </div>
+                </div>
+
+                <!-- Freeze action bar -->
+                <template if:true={hasDormantSelection}>
+                    <div class="action-bar">
+                        <span class="action-bar-count">
+                            {dormantSelectedCount} user{dormantSelectedCountPlural} selected
+                        </span>
+                        <button class="action-btn action-btn-freeze"
+                            onclick={handleFreezeSelected}
+                            disabled={freezeInProgress}>
+                            <template if:true={freezeInProgress}>⏳ Freezing…</template>
+                            <template if:false={freezeInProgress}>🧊 Freeze Selected</template>
+                        </button>
+                        <button class="action-btn action-btn-cancel" onclick={clearDormantSelection}>
+                            ✕ Clear selection
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Freeze result toast -->
+                <template if:true={freezeResultMsg}>
+                    <div class={freezeResultCls}>
+                        {freezeResultMsg}
+                        <button class="toast-close" onclick={clearFreezeResult}>✕</button>
+                    </div>
+                </template>
+
+                <template if:true={hasDormantUsers}>
+                    <div class="table-wrap">
+                        <table class="soc-table">
+                            <thead>
+                                <tr>
+                                    <th class="th-check">
+                                        <input type="checkbox"
+                                            class="soc-checkbox"
+                                            checked={allDormantSelected}
+                                            onchange={handleSelectAllDormant} />
+                                    </th>
+                                    <th class="th-sortable" data-col="name" onclick={handleDormantSort}>
+                                        Name {dormantSortIcon.name}
+                                    </th>
+                                    <th class="th-sortable" data-col="userName" onclick={handleDormantSort}>
+                                        Username {dormantSortIcon.userName}
+                                    </th>
+                                    <th class="th-sortable" data-col="profileName" onclick={handleDormantSort}>
+                                        Profile {dormantSortIcon.profileName}
+                                    </th>
+                                    <th class="th-sortable" data-col="lastLoginDate" onclick={handleDormantSort}>
+                                        Last Login {dormantSortIcon.lastLoginDate}
+                                    </th>
+                                    <th class="th-sortable" data-col="dormantDays" onclick={handleDormantSort}>
+                                        Days Dormant {dormantSortIcon.dormantDays}
+                                    </th>
+                                    <th class="th-sortable" data-col="isActive" onclick={handleDormantSort}>
+                                        Status {dormantSortIcon.isActive}
+                                    </th>
+                                    <th>Risk Flags</th>
+                                    <th class="th-sortable" data-col="severity" onclick={handleDormantSort}>
+                                        Severity {dormantSortIcon.severity}
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template for:each={dormantUsersFiltered} for:item="u">
+                                    <tr key={u.userId} class={u.rowCls}>
+                                        <td class="th-check">
+                                            <input type="checkbox"
+                                                class="soc-checkbox"
+                                                data-userid={u.userId}
+                                                checked={u.selected}
+                                                onchange={handleDormantRowSelect} />
+                                        </td>
+                                        <td class="cell-name">
+                                            <a class="user-link" data-url={u.userUrl} onclick={handleLinkClick}>{u.name}</a>
+                                        </td>
+                                        <td class="cell-mono">
+                                            <a class="user-link user-link-mono" data-url={u.userUrl} onclick={handleLinkClick}>{u.userName}</a>
+                                        </td>
+                                        <td>
+                                            <template if:true={u.profileId}>
+                                                <a class="user-link" data-url={u.profileUrl} onclick={handleLinkClick}>{u.profileName}</a>
+                                            </template>
+                                            <template if:false={u.profileId}>{u.profileName}</template>
+                                        </td>
+                                        <td class="cell-date">{u.lastLoginDate}</td>
+                                        <td class="cell-days">{u.dormantDaysLabel}</td>
+                                        <td><span class={u.statusCls}>{u.statusLabel}</span></td>
+                                        <td class="cell-flags">{u.riskFlags}</td>
+                                        <td><span class={u.severityCls}>{u.severity}</span></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                        <template if:true={dormantNoResults}>
+                            <div class="no-results">No users match your search or filters.</div>
+                        </template>
+                    </div>
+                </template>
+                <template if:false={hasDormantUsers}>
+                    <div class="empty-state">✓ No dormant users found</div>
+                </template>
+            </template>
+
+            <!-- ── SUB-TAB: FROZEN ACCOUNTS ── -->
+            <template if:true={isDormantSubFrozen}>
+                <div class="section-header" style="margin-top:14px">
+                    <div class="section-header-row">
+                        <div>
+                            <h2>Frozen Accounts <span class="rule-tag">UserLogin.IsFrozen</span></h2>
+                            <p class="section-desc">Users currently frozen in this org. Select and unfreeze to restore access.</p>
+                        </div>
+                        <div class="header-actions">
+                            <div class="search-box-wrap">
+                                <span class="search-icon">⌕</span>
+                                <input type="text" class="search-box"
+                                    placeholder="Search name or username…"
+                                    value={frozenSearch}
+                                    oninput={handleFrozenSearch} />
+                                <template if:true={frozenSearch}>
+                                    <button class="search-clear" onclick={clearFrozenSearch}>✕</button>
+                                </template>
+                            </div>
+                            <template if:true={canExportCsv}>
+                                <button class="csv-btn" onclick={downloadFrozenCsv} title="Download CSV">
+                                    Download CSV ⬇
+                                </button>
+                            </template>
+                            <template if:false={canExportCsv}>
+                                <span class="csv-locked" title={csvLockedTitle}>🔒 Export restricted</span>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Unfreeze action bar -->
+                <template if:true={hasFrozenSelection}>
+                    <div class="action-bar action-bar-unfreeze">
+                        <span class="action-bar-count">
+                            {frozenSelectedCount} user{frozenSelectedCountPlural} selected
+                        </span>
+                        <button class="action-btn action-btn-unfreeze"
+                            onclick={handleUnfreezeSelected}
+                            disabled={freezeInProgress}>
+                            <template if:true={freezeInProgress}>⏳ Unfreezing…</template>
+                            <template if:false={freezeInProgress}>🔓 Unfreeze Selected</template>
+                        </button>
+                        <button class="action-btn action-btn-cancel" onclick={clearFrozenSelection}>
+                            ✕ Clear selection
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Unfreeze result toast -->
+                <template if:true={unfreezeResultMsg}>
+                    <div class={unfreezeResultCls}>
+                        {unfreezeResultMsg}
+                        <button class="toast-close" onclick={clearUnfreezeResult}>✕</button>
+                    </div>
+                </template>
+
+                <template if:true={hasFrozenUsers}>
+                    <div class="table-wrap">
+                        <table class="soc-table">
+                            <thead>
+                                <tr>
+                                    <th class="th-check">
+                                        <input type="checkbox"
+                                            class="soc-checkbox"
+                                            checked={allFrozenSelected}
+                                            onchange={handleSelectAllFrozen} />
+                                    </th>
+                                    <th>Name</th>
+                                    <th>Username</th>
+                                    <th>Profile</th>
+                                    <th>Last Login</th>
+                                    <th>Frozen On</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template for:each={frozenUsersFiltered} for:item="u">
+                                    <tr key={u.userId} class="row-frozen">
+                                        <td class="th-check">
+                                            <input type="checkbox"
+                                                class="soc-checkbox"
+                                                data-userid={u.userId}
+                                                checked={u.selected}
+                                                onchange={handleFrozenRowSelect} />
+                                        </td>
+                                        <td class="cell-name">
+                                            <a class="user-link" data-url={u.userUrl} onclick={handleLinkClick}>{u.name}</a>
+                                        </td>
+                                        <td class="cell-mono">
+                                            <a class="user-link user-link-mono" data-url={u.userUrl} onclick={handleLinkClick}>{u.userName}</a>
+                                        </td>
+                                        <td>
+                                            <template if:true={u.profileId}>
+                                                <a class="user-link" data-url={u.profileUrl} onclick={handleLinkClick}>{u.profileName}</a>
+                                            </template>
+                                            <template if:false={u.profileId}>{u.profileName}</template>
+                                        </td>
+                                        <td class="cell-date">{u.lastLoginDate}</td>
+                                        <td class="cell-date cell-frozen-date">{u.frozenDate}</td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                        <template if:true={frozenNoResults}>
+                            <div class="no-results">No frozen users match your search.</div>
+                        </template>
+                    </div>
+                </template>
+                <template if:false={hasFrozenUsers}>
+                    <div class="empty-state">✓ No frozen accounts found in this org</div>
+                </template>
+            </template>
+
+        </div>
+    </template>
+
+    <!-- ═══════════════════════════════════════════
+            TAB: PRIVILEGED ACCESS
+    ═══════════════════════════════════════════ -->
+    <template if:true={isTabPrivileged}>
+        <div class="tab-content">
+            <div class="section-header">
+                <div class="section-header-row">
+                    <div>
+                        <h2>Privileged Access Monitoring
+                            <span class="rule-tag rule-tag-hoverable"
+                                  data-rules="privileged"
+                                  onmouseenter={handleRuleTagEnter}
+                                  onmouseleave={handleRuleTagLeave}>
+                                Rules B1 B2 B3 C1 C2
+                            </span>
+                        </h2>
+                        <p class="section-desc">Users with ModifyAllData, ViewAllData, or ViewEncryptedData. Click any name, username, or profile to open in a new tab.</p>
+                    </div>
+                    <div class="header-actions">
+                        <div class="search-box-wrap">
+                            <span class="search-icon">⌕</span>
+                            <input type="text" class="search-box"
+                                placeholder="Search name or username…"
+                                value={privSearch}
+                                oninput={handlePrivSearch} />
+                            <template if:true={privSearch}>
+                                <button class="search-clear" onclick={clearPrivSearch}>✕</button>
+                            </template>
+                        </div>
+                        <template if:true={canExportCsv}>
+                            <button class="csv-btn" onclick={downloadPrivCsv} title="Download CSV">
+                                Download CSV ⬇
+                            </button>
+                        </template>
+                        <template if:false={canExportCsv}>
+                            <span class="csv-locked" title={csvLockedTitle}>🔒 Export restricted</span>
+                        </template>
+                    </div>
+                </div>
+                <div class="filter-bar">
+                    <span class="filter-label">Profile:</span>
+                    <select class="filter-select" onchange={handlePrivProfileFilter}>
+                        <option value="">All Profiles</option>
+                        <template for:each={privProfileOptions} for:item="opt">
+                            <option key={opt} value={opt}>{opt}</option>
+                        </template>
+                    </select>
+                    <span class="filter-label">Permission Set:</span>
+                    <select class="filter-select" onchange={handlePrivPermSetFilter}>
+                        <option value="">All Permission Sets</option>
+                        <template for:each={privPermSetOptions} for:item="opt">
+                            <option key={opt} value={opt}>{opt}</option>
+                        </template>
+                    </select>
+                    <span class="filter-label">Severity:</span>
+                    <select class="filter-select" onchange={handlePrivSeverityFilter}>
+                        <option value="">All</option>
+                        <option value="Critical">Critical</option>
+                        <option value="High">High</option>
+                    </select>
+                    <span class="results-count">{privFilteredCount} users</span>
+                    <button class="filter-reset" onclick={resetPrivFilters}>Reset</button>
+                </div>
+                <div class="flag-filter-bar">
+                    <span class="filter-label">Risk Flags (AND filter):</span>
+                    <template for:each={privFlagOptions} for:item="f">
+                        <button key={f.value}
+                            class={f.cls}
+                            data-flag={f.value}
+                            onclick={handlePrivFlagToggle}>
+                            {f.label}
+                        </button>
+                    </template>
+                    <template if:true={hasPrivFlagFilter}>
+                        <button class="flag-pill flag-pill-clear" onclick={clearPrivFlags}>✕ Clear flags</button>
+                    </template>
+                </div>
+            </div>
+
+            <template if:true={hasPrivilegedUsers}>
+                <div class="table-wrap">
+                    <table class="soc-table">
+                        <thead>
+                            <tr>
+                                <th class="th-sortable" data-col="name" onclick={handlePrivSort}>Name {privSortIcon.name}</th>
+                                <th class="th-sortable" data-col="userName" onclick={handlePrivSort}>Username {privSortIcon.userName}</th>
+                                <th class="th-sortable" data-col="profileName" onclick={handlePrivSort}>Profile {privSortIcon.profileName}</th>
+                                <th class="th-sortable" data-col="lastLoginDate" onclick={handlePrivSort}>Last Login {privSortIcon.lastLoginDate}</th>
+                                <th>Risk Flags</th>
+                                <th class="th-sortable" data-col="severity" onclick={handlePrivSort}>Severity {privSortIcon.severity}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template for:each={privUsersFiltered} for:item="u">
+                                <tr key={u.userId} class={u.rowCls}>
+                                    <td class="cell-name"><a class="user-link" data-url={u.userUrl} onclick={handleLinkClick}>{u.name}</a></td>
+                                    <td class="cell-mono"><a class="user-link user-link-mono" data-url={u.userUrl} onclick={handleLinkClick}>{u.userName}</a></td>
+                                    <td>
+                                        <template if:true={u.profileId}><a class="user-link" data-url={u.profileUrl} onclick={handleLinkClick}>{u.profileName}</a></template>
+                                        <template if:false={u.profileId}>{u.profileName}</template>
+                                    </td>
+                                    <td class="cell-date">{u.lastLoginDate}</td>
+                                    <td class="cell-flags-wrap">
+                                        <template for:each={u.flagPills} for:item="fp"><span key={fp.label} class={fp.cls}>{fp.label}</span></template>
+                                    </td>
+                                    <td><span class={u.severityCls}>{u.severity}</span></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <template if:true={privNoResults}><div class="no-results">No users match your search or filters.</div></template>
+                </div>
+            </template>
+            <template if:false={hasPrivilegedUsers}><div class="empty-state">✓ No over-privileged users found</div></template>
+        </div>
+    </template>
+
+    <!-- ═══════════════════════════════════════════
+            TAB: EXPORT & DOWNLOAD
+    ═══════════════════════════════════════════ -->
+    <template if:true={isTabExport}>
+        <div class="tab-content">
+            <div class="section-header">
+                <div class="section-header-row">
+                    <div>
+                        <h2>Export &amp; Download Monitoring
+                            <span class="rule-tag rule-tag-hoverable"
+                                  data-rules="export"
+                                  onmouseenter={handleRuleTagEnter}
+                                  onmouseleave={handleRuleTagLeave}>
+                                Rules E1–E5
+                            </span>
+                        </h2>
+                        <p class="section-desc">Users with data export, report export, QueryAllFiles, or BulkHardDelete — exfiltration risk.</p>
+                    </div>
+                    <div class="header-actions">
+                        <div class="search-box-wrap">
+                            <span class="search-icon">⌕</span>
+                            <input type="text" class="search-box"
+                                placeholder="Search name or username…"
+                                value={exportSearch}
+                                oninput={handleExportSearch} />
+                            <template if:true={exportSearch}>
+                                <button class="search-clear" onclick={clearExportSearch}>✕</button>
+                            </template>
+                        </div>
+                        <template if:true={canExportCsv}>
+                            <button class="csv-btn" onclick={downloadExportCsv} title="Download CSV">Download CSV ⬇</button>
+                        </template>
+                        <template if:false={canExportCsv}>
+                            <span class="csv-locked" title={csvLockedTitle}>🔒 Export restricted</span>
+                        </template>
+                    </div>
+                </div>
+                <div class="filter-bar">
+                    <span class="filter-label">Profile:</span>
+                    <select class="filter-select" onchange={handleExportProfileFilter}>
+                        <option value="">All Profiles</option>
+                        <template for:each={exportProfileOptions} for:item="opt">
+                            <option key={opt} value={opt}>{opt}</option>
+                        </template>
+                    </select>
+                    <span class="filter-label">Permission Set:</span>
+                    <select class="filter-select" onchange={handleExportPermSetFilter}>
+                        <option value="">All Permission Sets</option>
+                        <template for:each={exportPermSetOptions} for:item="opt">
+                            <option key={opt} value={opt}>{opt}</option>
+                        </template>
+                    </select>
+                    <span class="filter-label">Severity:</span>
+                    <select class="filter-select" onchange={handleExportSeverityFilter}>
+                        <option value="">All</option>
+                        <option value="Critical">Critical</option>
+                        <option value="High">High</option>
+                    </select>
+                    <span class="results-count">{exportFilteredCount} users</span>
+                    <button class="filter-reset" onclick={resetExportFilters}>Reset</button>
+                </div>
+                <div class="flag-filter-bar">
+                    <span class="filter-label">Export Flags (AND filter):</span>
+                    <template for:each={exportFlagOptions} for:item="f">
+                        <button key={f.value} class={f.cls} data-flag={f.value} onclick={handleExportFlagToggle}>{f.label}</button>
+                    </template>
+                    <template if:true={hasExportFlagFilter}>
+                        <button class="flag-pill flag-pill-clear" onclick={clearExportFlags}>✕ Clear flags</button>
+                    </template>
+                </div>
+            </div>
+
+            <template if:true={hasExportUsers}>
+                <div class="table-wrap">
+                    <table class="soc-table">
+                        <thead>
+                            <tr>
+                                <th class="th-sortable" data-col="name" onclick={handleExportSort}>Name {exportSortIcon.name}</th>
+                                <th class="th-sortable" data-col="userName" onclick={handleExportSort}>Username {exportSortIcon.userName}</th>
+                                <th class="th-sortable" data-col="profileName" onclick={handleExportSort}>Profile {exportSortIcon.profileName}</th>
+                                <th class="th-sortable" data-col="lastLoginDate" onclick={handleExportSort}>Last Login {exportSortIcon.lastLoginDate}</th>
+                                <th>Export Flags</th>
+                                <th class="th-sortable" data-col="severity" onclick={handleExportSort}>Severity {exportSortIcon.severity}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template for:each={exportUsersFiltered} for:item="u">
+                                <tr key={u.userId} class={u.rowCls}>
+                                    <td class="cell-name"><a class="user-link" data-url={u.userUrl} onclick={handleLinkClick}>{u.name}</a></td>
+                                    <td class="cell-mono"><a class="user-link user-link-mono" data-url={u.userUrl} onclick={handleLinkClick}>{u.userName}</a></td>
+                                    <td>
+                                        <template if:true={u.profileId}><a class="user-link" data-url={u.profileUrl} onclick={handleLinkClick}>{u.profileName}</a></template>
+                                        <template if:false={u.profileId}>{u.profileName}</template>
+                                    </td>
+                                    <td class="cell-date">{u.lastLoginDate}</td>
+                                    <td class="cell-flags-wrap">
+                                        <template for:each={u.flagPills} for:item="fp"><span key={fp.label} class={fp.cls}>{fp.label}</span></template>
+                                    </td>
+                                    <td><span class={u.severityCls}>{u.severity}</span></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <template if:true={exportNoResults}><div class="no-results">No users match your search or filters.</div></template>
+                </div>
+            </template>
+            <template if:false={hasExportUsers}><div class="empty-state">✓ No export-enabled users found</div></template>
+        </div>
+    </template>
+
+    <!-- ═══════════════════════════════════════════
+            TAB: PASSWORD POLICY
+    ═══════════════════════════════════════════ -->
+    <template if:true={isTabPassword}>
+        <div class="tab-content">
+            <div class="section-header">
+                <div class="section-header-row">
+                    <div>
+                        <h2>Password Never Expires
+                            <span class="rule-tag rule-tag-hoverable"
+                                  data-rules="password"
+                                  onmouseenter={handleRuleTagEnter}
+                                  onmouseleave={handleRuleTagLeave}>
+                                Rule G1
+                            </span>
+                        </h2>
+                        <p class="section-desc">Users whose profile has PasswordNeverExpires = true. Acceptable only for service/integration accounts.</p>
+                    </div>
+                    <div class="header-actions">
+                        <div class="search-box-wrap">
+                            <span class="search-icon">⌕</span>
+                            <input type="text" class="search-box"
+                                placeholder="Search name or username…"
+                                value={pwdSearch}
+                                oninput={handlePwdSearch} />
+                            <template if:true={pwdSearch}>
+                                <button class="search-clear" onclick={clearPwdSearch}>✕</button>
+                            </template>
+                        </div>
+                        <template if:true={canExportCsv}>
+                            <button class="csv-btn" onclick={downloadPwdCsv} title="Download CSV">Download CSV ⬇</button>
+                        </template>
+                        <template if:false={canExportCsv}>
+                            <span class="csv-locked" title={csvLockedTitle}>🔒 Export restricted</span>
+                        </template>
+                    </div>
+                </div>
+                <div class="filter-bar">
+                    <span class="filter-label">Profile:</span>
+                    <select class="filter-select" onchange={handlePwdProfileFilter}>
+                        <option value="">All Profiles</option>
+                        <template for:each={pwdProfileOptions} for:item="opt">
+                            <option key={opt} value={opt}>{opt}</option>
+                        </template>
+                    </select>
+                    <span class="filter-label">Permission Set:</span>
+                    <select class="filter-select" onchange={handlePwdPermSetFilter}>
+                        <option value="">All Permission Sets</option>
+                        <template for:each={pwdPermSetOptions} for:item="opt">
+                            <option key={opt} value={opt}>{opt}</option>
+                        </template>
+                    </select>
+                    <span class="filter-label">Severity:</span>
+                    <select class="filter-select" onchange={handlePwdSeverityFilter}>
+                        <option value="">All</option>
+                        <option value="Critical">Critical</option>
+                        <option value="High">High</option>
+                    </select>
+                    <span class="results-count">{pwdFilteredCount} users</span>
+                    <button class="filter-reset" onclick={resetPwdFilters}>Reset</button>
+                </div>
+                <div class="flag-filter-bar">
+                    <span class="filter-label">Risk Flags (AND filter):</span>
+                    <template for:each={pwdFlagOptions} for:item="f">
+                        <button key={f.value} class={f.cls} data-flag={f.value} onclick={handlePwdFlagToggle}>{f.label}</button>
+                    </template>
+                    <template if:true={hasPwdFlagFilter}>
+                        <button class="flag-pill flag-pill-clear" onclick={clearPwdFlags}>✕ Clear flags</button>
+                    </template>
+                </div>
+            </div>
+
+            <template if:true={hasPasswordUsers}>
+                <div class="table-wrap">
+                    <table class="soc-table">
+                        <thead>
+                            <tr>
+                                <th class="th-sortable" data-col="name" onclick={handlePwdSort}>Name {pwdSortIcon.name}</th>
+                                <th class="th-sortable" data-col="userName" onclick={handlePwdSort}>Username {pwdSortIcon.userName}</th>
+                                <th class="th-sortable" data-col="profileName" onclick={handlePwdSort}>Profile {pwdSortIcon.profileName}</th>
+                                <th class="th-sortable" data-col="lastLoginDate" onclick={handlePwdSort}>Last Login {pwdSortIcon.lastLoginDate}</th>
+                                <th class="th-sortable" data-col="lastPasswordChange" onclick={handlePwdSort}>Last Pwd Change {pwdSortIcon.lastPasswordChange}</th>
+                                <th class="th-sortable" data-col="nextPasswordChange" onclick={handlePwdSort}>Next Pwd Change {pwdSortIcon.nextPasswordChange}</th>
+                                <th>Risk</th>
+                                <th class="th-sortable" data-col="severity" onclick={handlePwdSort}>Severity {pwdSortIcon.severity}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template for:each={pwdUsersFiltered} for:item="u">
+                                <tr key={u.userId} class={u.rowCls}>
+                                    <td class="cell-name"><a class="user-link" data-url={u.userUrl} onclick={handleLinkClick}>{u.name}</a></td>
+                                    <td class="cell-mono"><a class="user-link user-link-mono" data-url={u.userUrl} onclick={handleLinkClick}>{u.userName}</a></td>
+                                    <td>
+                                        <template if:true={u.profileId}><a class="user-link" data-url={u.profileUrl} onclick={handleLinkClick}>{u.profileName}</a></template>
+                                        <template if:false={u.profileId}>{u.profileName}</template>
+                                    </td>
+                                    <td class="cell-date">{u.lastLoginDate}</td>
+                                    <td class="cell-date cell-pwd-date">{u.lastPasswordChange}</td>
+                                    <td class={u.nextPwdChangeCls}>{u.nextPasswordChange}</td>
+                                    <td class="cell-flags-wrap">
+                                        <template for:each={u.flagPills} for:item="fp"><span key={fp.label} class={fp.cls}>{fp.label}</span></template>
+                                    </td>
+                                    <td><span class={u.severityCls}>{u.severity}</span></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <template if:true={pwdNoResults}><div class="no-results">No users match your search or filters.</div></template>
+                </div>
+            </template>
+            <template if:false={hasPasswordUsers}><div class="empty-state">✓ All users have password expiry enforced</div></template>
+        </div>
+    </template>
+
+    <!-- ═══════════════════════════════════════════
+            TAB: FAILED LOGINS
+    ═══════════════════════════════════════════ -->
+    <template if:true={isTabLogins}>
+        <div class="tab-content">
+            <div class="section-header">
+                <div class="section-header-row">
+                    <div>
+                        <h2>Login &amp; Auth Monitoring
+                            <span class="rule-tag rule-tag-hoverable"
+                                  data-rules="logins"
+                                  onmouseenter={handleRuleTagEnter}
+                                  onmouseleave={handleRuleTagLeave}>
+                                Rules F1–F8
+                            </span>
+                        </h2>
+                        <p class="section-desc">{loginWindowDesc} Spikes may indicate brute-force or credential-stuffing attacks.</p>
+                    </div>
+                    <div class="header-actions">
+                        <div class="search-box-wrap">
+                            <span class="search-icon">⌕</span>
+                            <input type="text" class="search-box"
+                                placeholder="Search name or username…"
+                                value={loginSearch}
+                                oninput={handleLoginSearch} />
+                            <template if:true={loginSearch}>
+                                <button class="search-clear" onclick={clearLoginSearch}>✕</button>
+                            </template>
+                        </div>
+                        <template if:true={canExportCsv}>
+                            <button class="csv-btn" onclick={downloadLoginCsv} title="Download CSV">Download CSV ⬇</button>
+                        </template>
+                        <template if:false={canExportCsv}>
+                            <span class="csv-locked" title={csvLockedTitle}>🔒 Export restricted</span>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Time window -->
+                <div class="time-window-bar">
+                    <span class="filter-label">Time window:</span>
+                    <template for:each={loginPresets} for:item="p">
+                        <button key={p.hours} class={p.cls} data-hours={p.hours} onclick={handlePresetClick}>{p.label}</button>
+                    </template>
+                    <span class="filter-label tw-separator">or custom:</span>
+                    <input type="number" class="tw-custom-num" min="1" max="9999" value={loginCustomValue} oninput={handleCustomValueInput} />
+                    <select class="filter-select tw-custom-unit" onchange={handleCustomUnitChange}>
+                        <option value="minutes">minutes</option>
+                        <option value="hours" selected>hours</option>
+                        <option value="days">days</option>
+                        <option value="weeks">weeks</option>
+                        <option value="months">months</option>
+                    </select>
+                    <button class="tw-apply-btn" onclick={applyCustomWindow}>Apply</button>
+                    <span class="results-count">{loginFilteredCount} failures</span>
+                </div>
+
+                <!-- Filters -->
+                <div class="filter-bar">
+                    <span class="filter-label">Status:</span>
+                    <select class="filter-select" onchange={handleLoginStatusFilter}>
+                        <option value="">All Statuses</option>
+                        <template for:each={loginStatusOptions} for:item="opt"><option key={opt} value={opt}>{opt}</option></template>
+                    </select>
+                    <span class="filter-label">Country:</span>
+                    <select class="filter-select" onchange={handleLoginCountryFilter}>
+                        <option value="">All Countries</option>
+                        <template for:each={loginCountryOptions} for:item="opt"><option key={opt} value={opt}>{opt}</option></template>
+                    </select>
+                    <span class="filter-label">TLS:</span>
+                    <select class="filter-select" onchange={handleLoginTlsFilter}>
+                        <option value="">All</option>
+                        <option value="weak">Weak (TLS 1.0 / 1.1)</option>
+                        <template for:each={loginTlsOptions} for:item="opt"><option key={opt} value={opt}>{opt}</option></template>
+                    </select>
+                    <button class="filter-reset" onclick={resetLoginFilters}>Reset</button>
+                </div>
+
+                <!-- ── GROUP BY BAR ── -->
+                <div class="groupby-bar">
+                    <span class="filter-label">Group by:</span>
+                    <template for:each={loginGroupByOptions} for:item="g">
+                        <button key={g.value}
+                            class={g.cls}
+                            data-val={g.value}
+                            onclick={handleLoginGroupBy}>
+                            {g.label}
+                        </button>
+                    </template>
+                    <template if:true={loginGroupByActive}>
+                        <button class="groupby-pill groupby-pill-clear" onclick={clearLoginGroupBy}>✕ Clear group</button>
+                        <span class="filter-label" style="margin-left:8px">Expand:</span>
+                        <button class="groupby-expand-btn" onclick={expandAllGroups}>All ▾</button>
+                        <button class="groupby-expand-btn" onclick={collapseAllGroups}>None ▴</button>
+                    </template>
+                </div>
+            </div>
+
+            <template if:true={hasLoginRows}>
+                <div class="table-wrap">
+                    <table class="soc-table">
+                        <thead>
+                            <tr>
+                                <th class="th-sortable" data-col="loginTime" onclick={handleLoginSort}>Time {loginSortIcon.loginTime}</th>
+                                <th class="th-sortable" data-col="userFullName" onclick={handleLoginSort}>Name {loginSortIcon.userFullName}</th>
+                                <th>User / Username</th>
+                                <th class="th-sortable" data-col="sourceIp" onclick={handleLoginSort}>Source IP {loginSortIcon.sourceIp}</th>
+                                <th class="th-sortable" data-col="loginType" onclick={handleLoginSort}>Login Type {loginSortIcon.loginType}</th>
+                                <th class="th-sortable" data-col="loginSubType" onclick={handleLoginSort}>Subtype {loginSortIcon.loginSubType}</th>
+                                <th class="th-sortable" data-col="status" onclick={handleLoginSort}>Status {loginSortIcon.status}</th>
+                                <th class="th-sortable" data-col="application" onclick={handleLoginSort}>Application {loginSortIcon.application}</th>
+                                <th class="th-sortable" data-col="loginUrl" onclick={handleLoginSort}>Login URL {loginSortIcon.loginUrl}</th>
+                                <th class="th-sortable" data-col="experience" onclick={handleLoginSort}>Experience {loginSortIcon.experience}</th>
+                                <th class="th-sortable" data-col="forwardedForIp" onclick={handleLoginSort}>Fwd IP {loginSortIcon.forwardedForIp}</th>
+                                <th class="th-sortable" data-col="browser" onclick={handleLoginSort}>Browser {loginSortIcon.browser}</th>
+                                <th class="th-sortable" data-col="country" onclick={handleLoginSort}>Country {loginSortIcon.country}</th>
+                                <th class="th-sortable" data-col="tlsProtocol" onclick={handleLoginSort}>TLS {loginSortIcon.tlsProtocol}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- ── UNGROUPED view ── -->
+                            <template if:false={loginGroupByActive}>
+                                <template for:each={loginRowsFiltered} for:item="l">
+                                    <tr key={l._key} class={l.rowCls}>
+                                        <td class="cell-date">{l.loginTime}</td>
+                                        <td class="cell-name"><a class="user-link" data-url={l.userUrl} onclick={handleLinkClick}>{l.userFullName}</a></td>
+                                        <td class="cell-mono">
+                                            <a class="user-link user-link-mono" data-url={l.userUrl} onclick={handleLinkClick}>{l.userId}</a>
+                                            <div class="cell-username">{l.userName}</div>
+                                        </td>
+                                        <td class="cell-mono">{l.sourceIp}</td>
+                                        <td class="cell-login-type">{l.loginType}</td>
+                                        <td class="cell-login-sub">{l.loginSubType}</td>
+                                        <td><span class="badge-fail">{l.status}</span></td>
+                                        <td class="cell-app">{l.application}</td>
+                                        <td class="cell-url">{l.loginUrl}</td>
+                                        <td class="cell-exp">{l.experience}</td>
+                                        <td class="cell-mono cell-fwdip">{l.forwardedForIp}</td>
+                                        <td class="cell-browser">{l.browser}</td>
+                                        <td class="cell-country">{l.country}</td>
+                                        <td class={l.tlsCls}>{l.tlsProtocol}</td>
+                                    </tr>
+                                </template>
+                            </template>
+
+                            <!-- ── GROUPED view ── -->
+                            <template if:true={loginGroupByActive}>
+                                <template for:each={loginGroupedRows} for:item="grp">
+                                    <tr key={grp.key} class="row-group-header" data-grpkey={grp.key} onclick={handleGroupToggle}>
+                                        <td colspan="14" class="cell-group-header">
+                                            <span class={grp.caretCls}>▶</span>
+                                            <span class="grp-label">{grp.groupValue}</span>
+                                            <span class="grp-count">{grp.count} event{grp.countPlural}</span>
+                                        </td>
+                                    </tr>
+                                    <template if:true={grp.expanded}>
+                                        <template for:each={grp.rows} for:item="l">
+                                            <tr key={l._key} class={l.rowCls}>
+                                                <td class="cell-date">{l.loginTime}</td>
+                                                <td class="cell-name"><a class="user-link" data-url={l.userUrl} onclick={handleLinkClick}>{l.userFullName}</a></td>
+                                                <td class="cell-mono">
+                                                    <a class="user-link user-link-mono" data-url={l.userUrl} onclick={handleLinkClick}>{l.userId}</a>
+                                                    <div class="cell-username">{l.userName}</div>
+                                                </td>
+                                                <td class="cell-mono">{l.sourceIp}</td>
+                                                <td class="cell-login-type">{l.loginType}</td>
+                                                <td class="cell-login-sub">{l.loginSubType}</td>
+                                                <td><span class="badge-fail">{l.status}</span></td>
+                                                <td class="cell-app">{l.application}</td>
+                                                <td class="cell-url">{l.loginUrl}</td>
+                                                <td class="cell-exp">{l.experience}</td>
+                                                <td class="cell-mono cell-fwdip">{l.forwardedForIp}</td>
+                                                <td class="cell-browser">{l.browser}</td>
+                                                <td class="cell-country">{l.country}</td>
+                                                <td class={l.tlsCls}>{l.tlsProtocol}</td>
+                                            </tr>
+                                        </template>
+                                    </template>
+                                </template>
+                            </template>
+                        </tbody>
+                    </table>
+                    <template if:true={loginNoResults}><div class="no-results">No failed logins match your filters.</div></template>
+                </div>
+            </template>
+            <template if:false={hasLoginRows}><div class="empty-state">✓ No failed logins in {loginWindowLabel}</div></template>
+        </div>
+    </template>
+
+    <!-- ═══════════════════════════════════════════
+            TAB: AUDIT TRAIL
+    ═══════════════════════════════════════════ -->
+    <template if:true={isTabAudit}>
+        <div class="tab-content">
+            <div class="section-header">
+
+                <!-- ROW 1: title on left, search + csv on right -->
+                <div class="section-header-row">
+                    <div>
+                        <h2>Audit Trail — Package &amp; Permission Events
+                            <span class="rule-tag rule-tag-hoverable"
+                                  data-rules="audit"
+                                  onmouseenter={handleRuleTagEnter}
+                                  onmouseleave={handleRuleTagLeave}>
+                                Rules A1–A4
+                            </span>
+                        </h2>
+                        <p class="section-desc">{auditWindowDesc} Click "By" name to open user record.</p>
+                    </div>
+                    <div class="header-actions">
+                        <div class="search-box-wrap">
+                            <span class="search-icon">⌕</span>
+                            <input type="text" class="search-box"
+                                placeholder="Search by name…"
+                                value={auditSearch}
+                                oninput={handleAuditSearch} />
+                            <template if:true={auditSearch}>
+                                <button class="search-clear" onclick={clearAuditSearch}>✕</button>
+                            </template>
+                        </div>
+                        <template if:true={canExportCsv}>
+                            <button class="csv-btn" onclick={downloadAuditCsv} title="Download CSV">Download CSV ⬇</button>
+                        </template>
+                        <template if:false={canExportCsv}>
+                            <span class="csv-locked" title={csvLockedTitle}>🔒 Export restricted</span>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- ROW 2: time filter -->
+                <div class="audit-time-row">
+                    <div class="audit-time-wrap">
+                        <button class="audit-time-btn" onclick={toggleAuditTimePicker} title="Filter by time range">
+                            🕒 {auditWindowLabel}
+                            <span class="audit-time-caret">▾</span>
+                        </button>
+                        <template if:true={auditTimePickerOpen}>
+                            <div class="audit-time-backdrop" onclick={closeAuditTimePicker}></div>
+                            <div class="audit-time-dropdown">
+                                <div class="audit-time-dropdown-inner">
+                                    <div class="audit-time-col audit-time-col-abs">
+                                        <h4 class="audit-time-h4">Absolute time range</h4>
+                                        <label class="audit-time-label">From</label>
+                                        <input type="datetime-local" class="audit-time-input" value={auditFromInput} onchange={handleAuditFromChange} />
+                                        <label class="audit-time-label">To</label>
+                                        <input type="datetime-local" class="audit-time-input" value={auditToInput} onchange={handleAuditToChange} />
+                                        <button class="audit-time-apply" onclick={applyAuditAbsoluteRange}>Apply time range</button>
+                                        <template if:true={hasAuditTimeFilter}>
+                                            <button class="audit-time-clear" onclick={clearAuditTimeFilter}>✕ Clear time filter</button>
+                                        </template>
+                                        <p class="audit-time-hint">Enter dates in your local timezone. The query runs against SetupAuditTrail.CreatedDate.</p>
+                                    </div>
+                                    <div class="audit-time-col audit-time-col-quick">
+                                        <h4 class="audit-time-h4">Quick ranges</h4>
+                                        <div class="audit-quick-list">
+                                            <template for:each={auditQuickRanges} for:item="q">
+                                                <button key={q.hours} class={q.cls} data-hours={q.hours} onclick={handleAuditQuickRange}>{q.label}</button>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- ROW 3: filter bar -->
+                <!-- Severity filter removed per requirements. Permission Set filter added,
+                     implemented identically to the Profile filter pattern used elsewhere
+                     in this app (options derived from loaded rows, single-select,
+                     equality match, integrates with search/section/action filters). -->
+                <div class="filter-bar">
+                    <span class="filter-label">Section:</span>
+                    <select class="filter-select" onchange={handleAuditSectionFilter}>
+                        <option value="">All Sections</option>
+                        <template for:each={auditSectionOptions} for:item="opt"><option key={opt} value={opt}>{opt}</option></template>
+                    </select>
+                    <span class="filter-label">Action contains:</span>
+                    <select class="filter-select" onchange={handleAuditActionFilter}>
+                        <option value="">All Actions</option>
+                        <template for:each={auditActionOptions} for:item="opt"><option key={opt} value={opt}>{opt}</option></template>
+                    </select>
+                    <span class="filter-label">Permission Set:</span>
+                    <select class="filter-select" onchange={handleAuditPermSetFilter}>
+                        <option value="">All Permission Sets</option>
+                        <template for:each={auditPermSetOptions} for:item="opt"><option key={opt} value={opt}>{opt}</option></template>
+                    </select>
+                    <span class="results-count">{auditFilteredCount} of {auditLoadedCount} events</span>
+                    <button class="filter-reset" onclick={resetAuditFilters}>Reset</button>
+                </div>
+            </div>
+
+            <template if:true={hasAuditEvents}>
+                <div class="table-wrap">
+                    <table class="soc-table">
+                        <thead>
+                            <tr>
+                                <th class="th-sortable" data-col="createdDate" onclick={handleAuditSort}>Date {auditSortIcon.createdDate}</th>
+                                <th class="th-sortable" data-col="createdByName" onclick={handleAuditSort}>By {auditSortIcon.createdByName}</th>
+                                <th class="th-sortable" data-col="section" onclick={handleAuditSort}>Section {auditSortIcon.section}</th>
+                                <th class="th-sortable" data-col="action" onclick={handleAuditSort}>Action {auditSortIcon.action}</th>
+                                <th>Detail</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template for:each={auditEventsFiltered} for:item="a">
+                                <tr key={a.createdDate} class={a.rowCls}>
+                                    <td class="cell-date">{a.createdDate}</td>
+                                    <td class="cell-name">
+                                        <template if:true={a.createdById}><a class="user-link" data-url={a.userUrl} onclick={handleLinkClick}>{a.createdByName}</a></template>
+                                        <template if:false={a.createdById}>{a.createdByName}</template>
+                                    </td>
+                                    <td class="cell-section">{a.section}</td>
+                                    <td class="cell-mono cell-action">{a.action}</td>
+                                    <td class="cell-detail-wrap">{a.display}</td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <template if:true={auditNoResults}><div class="no-results">No events match your search or filters.</div></template>
+                </div>
+            </template>
+            <template if:false={hasAuditEvents}><div class="empty-state">✓ No audit events found in this time range</div></template>
+        </div>
+    </template>
+
+    <!-- ── RULE TOOLTIP POPOVER ── -->
+    <template if:true={rulePopoverVisible}>
+        <div class="rule-popover"
+             style={rulePopoverStyle}
+             onmouseenter={handlePopoverEnter}
+             onmouseleave={handlePopoverLeave}>
+            <div class="rule-popover-title">{rulePopoverTitle}</div>
+            <ul class="rule-popover-list">
+                <template for:each={rulePopoverItems} for:item="item">
+                    <li key={item.id} class="rule-popover-item">
+                        <span class={item.sevCls}>{item.id}</span>
+                        <div>
+                            <div class="rule-item-name">{item.name}</div>
+                            <div class="rule-item-logic">{item.logic}</div>
+                        </div>
+                    </li>
+                </template>
+            </ul>
+        </div>
+    </template>
+
+    <!-- ── FOOTER ── -->
+    <footer class="soc-footer">
+        Salesforce SOC Dashboard · Data sourced from User, Profile, LoginHistory, SetupAuditTrail · Dormant = no login ≥ 90 days
+    </footer>
+
+</div>
+</template>
